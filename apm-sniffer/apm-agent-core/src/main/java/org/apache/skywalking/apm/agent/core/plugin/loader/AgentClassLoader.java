@@ -48,6 +48,7 @@ import org.apache.skywalking.apm.agent.core.plugin.PluginBootstrap;
 public class AgentClassLoader extends ClassLoader {
 
     static {
+        // 开启并行类加载器
         tryRegisterAsParallelCapable();
     }
 
@@ -95,6 +96,7 @@ public class AgentClassLoader extends ClassLoader {
         if (DEFAULT_LOADER == null) {
             synchronized (AgentClassLoader.class) {
                 if (DEFAULT_LOADER == null) {
+                    // 创建类加载器, 并指定父加载器
                     DEFAULT_LOADER = new AgentClassLoader(PluginBootstrap.class.getClassLoader());
                 }
             }
@@ -105,6 +107,7 @@ public class AgentClassLoader extends ClassLoader {
         super(parent);
         File agentDictionary = AgentPackagePath.getPath();
         classpath = new LinkedList<File>();
+        // 将这两个目录作为 AgentClassLoader 的资源
         classpath.add(new File(agentDictionary, "plugins"));
         classpath.add(new File(agentDictionary, "activations"));
     }
