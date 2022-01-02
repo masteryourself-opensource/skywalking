@@ -56,20 +56,24 @@ public class SnifferConfigInitializer {
         InputStreamReader configFileStream;
 
         try {
+            // 读取配置文件
             configFileStream = loadConfig();
             Properties properties = new Properties();
             properties.load(configFileStream);
+            // 使用占位符解析配置文件属性
             for (String key : properties.stringPropertyNames()) {
                 String value = (String)properties.get(key);
                 //replace the key's value. properties.replace(key,value) in jdk8+
                 properties.put(key, PropertyPlaceholderHelper.INSTANCE.replacePlaceholders(value, properties));
             }
+            // 将配置信息映射到 config 类中, 下面如果属性覆盖了也会重新给 Config 替换
             ConfigInitializer.initialize(properties, Config.class);
         } catch (Exception e) {
             logger.error(e, "Failed to read the config file, skywalking is going to run in default config.");
         }
 
         try {
+            // 使用系统环境变量覆盖, 环境变量必须以 skywalking 开头
             overrideConfigBySystemProp();
         } catch (Exception e) {
             logger.error(e, "Failed to read the system properties.");
@@ -79,7 +83,7 @@ public class SnifferConfigInitializer {
             try {
                 agentOptions = agentOptions.trim();
                 logger.info("Agent options is {}.", agentOptions);
-
+                // 使用 agent 参数覆盖
                 overrideConfigByAgentOptions(agentOptions);
             } catch (Exception e) {
                 logger.error(e, "Failed to parse the agent options, val is {}.", agentOptions);
@@ -176,7 +180,10 @@ public class SnifferConfigInitializer {
      */
     private static InputStreamReader loadConfig() throws AgentPackageNotFoundException, ConfigNotFoundException, ConfigReadFailedException {
 
+        // 如果系统环境变量有特殊指定 skywalking_config, 就使用特殊指定的作为配置文件读取路径
         String specifiedConfigPath = System.getProperties().getProperty(SPECIFIED_CONFIG_PATH);
+        // AgentPackagePath.getPath() 就是定位 skywalking-agent.jar 包在磁盘上的绝对位置
+        // 没有特殊指定，就使用 skywalking-agent.jar 路径下的 /config/agent.config 作为配置文件读取路径
         File configFile = StringUtil.isEmpty(specifiedConfigPath) ? new File(AgentPackagePath.getPath(), DEFAULT_CONFIG_FILE_NAME) : new File(specifiedConfigPath);
 
         if (configFile.exists() && configFile.isFile()) {

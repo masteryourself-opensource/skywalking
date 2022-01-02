@@ -61,6 +61,9 @@ public class SkyWalkingAgent {
     /**
      * Main entrance. Use byte-buddy transform to enhance all classes, which define in plugins.
      *
+     * -javaagent:/path/agent.jar=k1=v1,k2=v2, 必须放在 -jar 之前, 否则不生效
+     * agentArgs 表示等号之后的参数即 k1=v1,k2=v2
+     *
      * @param agentArgs
      * @param instrumentation
      * @throws PluginException
@@ -68,8 +71,10 @@ public class SkyWalkingAgent {
     public static void premain(String agentArgs, Instrumentation instrumentation) throws PluginException, IOException {
         final PluginFinder pluginFinder;
         try {
+            // 1. 初始化配置
             SnifferConfigInitializer.initialize(agentArgs);
 
+            // 2. 加载插件
             pluginFinder = new PluginFinder(new PluginBootstrap().loadPlugins());
 
         } catch (ConfigNotFoundException ce) {
@@ -112,6 +117,7 @@ public class SkyWalkingAgent {
             return;
         }
 
+        // 3. 定制化 Agent 行为
         agentBuilder
             .type(pluginFinder.buildMatch())
             .transform(new Transformer(pluginFinder))
@@ -120,11 +126,13 @@ public class SkyWalkingAgent {
             .installOn(instrumentation);
 
         try {
+            // 4. 启动服务
             ServiceManager.INSTANCE.boot();
         } catch (Exception e) {
             logger.error(e, "Skywalking agent boot failure.");
         }
 
+        // 5. 注册关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override public void run() {
                 ServiceManager.INSTANCE.shutdown();
