@@ -25,6 +25,7 @@ import java.lang.instrument.Instrumentation;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.description.type.TypeDescription;
@@ -75,15 +76,19 @@ public class BootstrapInstrumentBoost {
 
     public static AgentBuilder inject(PluginFinder pluginFinder, Instrumentation instrumentation, AgentBuilder agentBuilder,
         JDK9ModuleExporter.EdgeClasses edgeClasses) throws PluginException {
+        // 所有要注入到 Bootstrap Classloader 的类, key 是类限定名, value 是字节码
         Map<String, byte[]> classesTypeMap = new HashMap<String, byte[]>();
-
+        // 针对于目标类是 jdk 核心类库的插件, 这里根据插件的拦截点不同（实例方法, 静态方法, 构造方法）
+        // 使用不同的模板来定义新的拦截器的核心处理逻辑, 并且将插件本身定义的拦截器的全类名赋值给模板的 TARGET_INTERCEPTOR 字段
+        // 最终这些新拦截器的核心处理逻辑都会被 Bootstrap Classloader 加载
         if (!prepareJREInstrumentation(pluginFinder, classesTypeMap)) {
             return agentBuilder;
         }
-
+        // 把 skywalking 的一些核心工具类加载到 classesTypeMap
         for (String highPriorityClass : HIGH_PRIORITY_CLASSES) {
             loadHighPriorityClass(classesTypeMap, highPriorityClass);
         }
+        // 把 ByteBuddy 的一些核心工具类加载到 classesTypeMap
         for (String highPriorityClass : ByteBuddyCoreClasses.CLASSES) {
             loadHighPriorityClass(classesTypeMap, highPriorityClass);
         }
@@ -98,6 +103,7 @@ public class BootstrapInstrumentBoost {
         /**
          * Inject the classes into bootstrap class loader by using Unsafe Strategy.
          * ByteBuddy adapts the sun.misc.Unsafe and jdk.internal.misc.Unsafe automatically.
+         * 把 classesTypeMap 中定义的一些字节码加载到 BootstrapCL 中
          */
         ClassInjector.UsingUnsafe.Factory factory = ClassInjector.UsingUnsafe.Factory.resolve(instrumentation);
         factory.make(null, null).injectRaw(classesTypeMap);
@@ -125,6 +131,7 @@ public class BootstrapInstrumentBoost {
      */
     public static Class forInternalDelegateClass(String methodsInterceptor) {
         try {
+            // 直接构造出之前放入到 BootstrapCL 中的 xx_internal 对象
             return Class.forName(internalDelegate(methodsInterceptor));
         } catch (ClassNotFoundException e) {
             throw new PluginException(e.getMessage(), e);
@@ -134,29 +141,36 @@ public class BootstrapInstrumentBoost {
     /**
      * Generate dynamic delegate for ByteBuddy
      *
-     * @param pluginFinder gets the whole plugin list.
+     * @param pluginFinder   gets the whole plugin list.
      * @param classesTypeMap hosts the class binary.
      * @return true if have JRE instrumentation requirement.
      * @throws PluginException when generate failure.
      */
     private static boolean prepareJREInstrumentation(PluginFinder pluginFinder,
-        Map<String, byte[]> classesTypeMap) throws PluginException {
+                                                     Map<String, byte[]> classesTypeMap) throws PluginException {
+        // 从加载 BootstrapInstrumentBoost 类的 classloader 获取类型池
         TypePool typePool = TypePool.Default.of(BootstrapInstrumentBoost.class.getClassLoader());
+        // 找到所有要对 jdk 类库做增强的插件
         List<AbstractClassEnhancePluginDefine> bootstrapClassMatchDefines = pluginFinder.getBootstrapClassMatchDefine();
+        // 循环所有的插件
         for (AbstractClassEnhancePluginDefine define : bootstrapClassMatchDefines) {
+            // 循环处理插件的实例方法拦截器
             for (InstanceMethodsInterceptPoint point : define.getInstanceMethodsInterceptPoints()) {
+                // 判断是否重写参数
                 if (point.isOverrideArgs()) {
                     generateDelegator(classesTypeMap, typePool, INSTANCE_METHOD_WITH_OVERRIDE_ARGS_DELEGATE_TEMPLATE, point.getMethodsInterceptor());
                 } else {
+                    // 生成代理器
                     generateDelegator(classesTypeMap, typePool, INSTANCE_METHOD_DELEGATE_TEMPLATE, point.getMethodsInterceptor());
                 }
             }
-
+            // 循环处理插件的构造方法拦截器
             for (ConstructorInterceptPoint point : define.getConstructorsInterceptPoints()) {
                 generateDelegator(classesTypeMap, typePool, CONSTRUCTOR_DELEGATE_TEMPLATE, point.getConstructorInterceptor());
             }
-
+            // 循环处理插件的静态方法拦截器
             for (StaticMethodsInterceptPoint point : define.getStaticMethodsInterceptPoints()) {
+                // 判断是否重写参数
                 if (point.isOverrideArgs()) {
                     generateDelegator(classesTypeMap, typePool, STATIC_METHOD_WITH_OVERRIDE_ARGS_DELEGATE_TEMPLATE, point.getMethodsInterceptor());
                 } else {
@@ -169,28 +183,34 @@ public class BootstrapInstrumentBoost {
 
     /**
      * Generate the delegator class based on given template class. This is preparation stage level code generation.
-     *
+     * <p>
      * One key step to avoid class confliction between AppClassLoader and BootstrapClassLoader
      *
-     * @param classesTypeMap hosts injected binary of generated class
-     * @param typePool to generate new class
-     * @param templateClassName represents the class as template in this generation process. The templates are
-     * pre-defined in SkyWalking agent core.
+     * @param classesTypeMap     hosts injected binary of generated class
+     * @param typePool           to generate new class
+     * @param templateClassName  represents the class as template in this generation process. The templates are
+     *                           pre-defined in SkyWalking agent core.
      * @param methodsInterceptor
      */
     private static void generateDelegator(Map<String, byte[]> classesTypeMap, TypePool typePool,
-        String templateClassName, String methodsInterceptor) {
+                                          String templateClassName, String methodsInterceptor) {
+        // 给类名加上后缀 _internal
         String internalInterceptorName = internalDelegate(methodsInterceptor);
         try {
+            // 如果说 CL 已经加载了 100 个类, 但是这个 CL 的 classpath 还有一些类未加载
+            // 那么 typePool.describe() 方法可以把还未加载到的类拿到
             TypeDescription templateTypeDescription = typePool.describe(templateClassName)
-                .resolve();
+                    .resolve();
 
+            // 这里只是调用 make(), 即把字节码准备好
             DynamicType.Unloaded interceptorType = new ByteBuddy()
-                .redefine(templateTypeDescription, ClassFileLocator.ForClassLoader.of(BootstrapInstrumentBoost.class.getClassLoader()))
-                .name(internalInterceptorName)
-                .field(named("TARGET_INTERCEPTOR")).value(methodsInterceptor)
-                .make();
+                    .redefine(templateTypeDescription, ClassFileLocator.ForClassLoader.of(BootstrapInstrumentBoost.class.getClassLoader()))
+                    .name(internalInterceptorName)
+                    // 给属性赋值
+                    .field(named("TARGET_INTERCEPTOR")).value(methodsInterceptor)
+                    .make();
 
+            // 把模板进行编译, 然后给 TARGET_INTERCEPTOR 设置值, 最后编译放到 classesTypeMap
             classesTypeMap.put(internalInterceptorName, interceptorType.getBytes());
 
             InstrumentDebuggingClass.INSTANCE.log(interceptorType);
@@ -204,10 +224,10 @@ public class BootstrapInstrumentBoost {
      * instrumentation active by any plugin
      *
      * @param loadedTypeMap hosts all injected class
-     * @param className to load
+     * @param className     to load
      */
     private static void loadHighPriorityClass(Map<String, byte[]> loadedTypeMap,
-        String className) throws PluginException {
+                                              String className) throws PluginException {
         byte[] enhancedInstanceClassFile;
         try {
             String classResourceName = className.replaceAll("\\.", "/") + ".class";

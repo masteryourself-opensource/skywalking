@@ -21,6 +21,7 @@ package org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.Callable;
+
 import net.bytebuddy.implementation.bind.annotation.AllArguments;
 import net.bytebuddy.implementation.bind.annotation.Origin;
 import net.bytebuddy.implementation.bind.annotation.RuntimeType;
@@ -52,6 +53,7 @@ public class InstMethodsInter {
      */
     public InstMethodsInter(String instanceMethodsAroundInterceptorClassName, ClassLoader classLoader) {
         try {
+            // 这里需要把 classLoader 传入, 因为可能存在这种情况, 一个字节码被不同的 CL 加载
             interceptor = InterceptorInstanceLoader.load(instanceMethodsAroundInterceptorClassName, classLoader);
         } catch (Throwable t) {
             throw new PluginException("Can't create InstanceMethodsAroundInterceptor.", t);
@@ -61,13 +63,13 @@ public class InstMethodsInter {
     /**
      * Intercept the target instance method.
      *
-     * @param obj target class instance.
-     * @param allArguments all method arguments
-     * @param method method description.
-     * @param zuper the origin call ref.
+     * @param obj          target class instance. 增强后的代理对象
+     * @param allArguments all method arguments 参数
+     * @param method       method description. 此时的 method 等同于 intercept() 方法, 所以这里不能用 method.invoke(), 否则无限死循环
+     * @param zuper        the origin call ref. 原生的调用方法
      * @return the return value of target instance method.
      * @throws Exception only throw exception because of zuper.call() or unexpected exception in sky-walking ( This is a
-     * bug, if anything triggers this condition ).
+     *                   bug, if anything triggers this condition ).
      */
     @RuntimeType
     public Object intercept(@This Object obj,

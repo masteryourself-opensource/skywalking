@@ -122,6 +122,11 @@ public class InstanceMethodInterTemplate {
 
     /**
      * Prepare the context. Link to the agent core in AppClassLoader.
+     * 1. 打通 BootstrapCL 和 AgentCL
+     *  - 拿到 ILog 生成日志对象
+     *  - 拿到插件自定义的拦截器实例
+     * 2. 代替非 jdk 核心类库插件运行逻辑里的
+     *  InterceptorInstanceLoader.load(instanceMethodsAroundInterceptorClassName, classLoader);
      */
     private static void prepare() {
         if (INTERCEPTOR == null) {
