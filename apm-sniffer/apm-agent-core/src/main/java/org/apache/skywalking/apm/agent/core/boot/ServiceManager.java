@@ -44,11 +44,11 @@ public enum ServiceManager {
     public void boot() {
         // 加载所有服务实例
         bootedServices = loadAllServices();
-        // 按照优先级排序分别调用 prepare() 方法
+        // 分别调用 prepare() 方法
         prepare();
-        // 按照优先级排序分别调用 startup() 方法
+        // 分别调用 startup() 方法
         startup();
-        // 按照优先级排序分别调用 onComplete() 方法
+        // 分别调用 onComplete() 方法
         onComplete();
     }
 

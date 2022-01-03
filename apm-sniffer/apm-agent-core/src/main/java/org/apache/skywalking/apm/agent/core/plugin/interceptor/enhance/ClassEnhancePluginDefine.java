@@ -19,6 +19,7 @@
 
 package org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance;
 
+import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.dynamic.DynamicType;
@@ -71,10 +72,11 @@ public abstract class ClassEnhancePluginDefine extends AbstractClassEnhancePlugi
      */
     @Override
     protected DynamicType.Builder<?> enhance(TypeDescription typeDescription,
-        DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader,
-        EnhanceContext context) throws PluginException {
+                                             DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader,
+                                             EnhanceContext context) throws PluginException {
+        // 增强静态方法
         newClassBuilder = this.enhanceClass(typeDescription, newClassBuilder, classLoader);
-
+        // 增强构造方法和实例方法
         newClassBuilder = this.enhanceInstance(typeDescription, newClassBuilder, classLoader, context);
 
         return newClassBuilder;
@@ -88,9 +90,11 @@ public abstract class ClassEnhancePluginDefine extends AbstractClassEnhancePlugi
      * @return new byte-buddy's builder for further manipulation.
      */
     private DynamicType.Builder<?> enhanceInstance(TypeDescription typeDescription,
-        DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader,
-        EnhanceContext context) throws PluginException {
+                                                   DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader,
+                                                   EnhanceContext context) throws PluginException {
+        // 获取生效插件定义的构造方法拦截点
         ConstructorInterceptPoint[] constructorInterceptPoints = getConstructorsInterceptPoints();
+        // 获取生效插件定义的实例方法拦截点
         InstanceMethodsInterceptPoint[] instanceMethodsInterceptPoints = getInstanceMethodsInterceptPoints();
         String enhanceOriginClassName = typeDescription.getTypeName();
         boolean existedConstructorInterceptPoint = false;
@@ -117,31 +121,39 @@ public abstract class ClassEnhancePluginDefine extends AbstractClassEnhancePlugi
          * 2.Add a field accessor for this field.
          *
          * And make sure the source codes manipulation only occurs once.
+         * 判断当前类是否已经被增强过了, 因为不能重复定义字段, 所以这里需要判断一下
          *
          */
         if (!context.isObjectExtended()) {
+            // 未增强过就给这个类定义一个字段 _$EnhancedClassField_ws 同时实现 EnhancedInstance 接口
             newClassBuilder = newClassBuilder.defineField(CONTEXT_ATTR_NAME, Object.class, ACC_PRIVATE | ACC_VOLATILE)
-                .implement(EnhancedInstance.class)
-                .intercept(FieldAccessor.ofField(CONTEXT_ATTR_NAME));
+                    .implement(EnhancedInstance.class)
+                    .intercept(FieldAccessor.ofField(CONTEXT_ATTR_NAME));
+            // 标记已经增强过, 防止重复定义
             context.extendObjectCompleted();
         }
 
         /**
          * 2. enhance constructors
+         * 增强构造方法
          */
         if (existedConstructorInterceptPoint) {
             for (ConstructorInterceptPoint constructorInterceptPoint : constructorInterceptPoints) {
+                // 是 jdk 的类库
                 if (isBootstrapInstrumentation()) {
                     newClassBuilder = newClassBuilder.constructor(constructorInterceptPoint.getConstructorMatcher()).intercept(SuperMethodCall.INSTANCE
-                        .andThen(MethodDelegation.withDefaultConfiguration()
-                            .to(BootstrapInstrumentBoost.forInternalDelegateClass(constructorInterceptPoint.getConstructorInterceptor()))
-                        )
+                            .andThen(MethodDelegation.withDefaultConfiguration()
+                                    .to(BootstrapInstrumentBoost.forInternalDelegateClass(constructorInterceptPoint.getConstructorInterceptor()))
+                            )
                     );
-                } else {
+                }
+                // 非 jdk 类库
+                else {
                     newClassBuilder = newClassBuilder.constructor(constructorInterceptPoint.getConstructorMatcher()).intercept(SuperMethodCall.INSTANCE
-                        .andThen(MethodDelegation.withDefaultConfiguration()
-                            .to(new ConstructorInter(constructorInterceptPoint.getConstructorInterceptor(), classLoader))
-                        )
+                            .andThen(MethodDelegation.withDefaultConfiguration()
+                                    // 使用 ByteBuddy api 将真正的代理逻辑交给 ConstructorInter
+                                    .to(new ConstructorInter(constructorInterceptPoint.getConstructorInterceptor(), classLoader))
+                            )
                     );
                 }
             }
@@ -149,6 +161,7 @@ public abstract class ClassEnhancePluginDefine extends AbstractClassEnhancePlugi
 
         /**
          * 3. enhance instance methods
+         * 增强实例方法
          */
         if (existedMethodsInterceptPoints) {
             for (InstanceMethodsInterceptPoint instanceMethodsInterceptPoint : instanceMethodsInterceptPoints) {
@@ -156,47 +169,58 @@ public abstract class ClassEnhancePluginDefine extends AbstractClassEnhancePlugi
                 if (StringUtil.isEmpty(interceptor)) {
                     throw new EnhanceException("no InstanceMethodsAroundInterceptor define to enhance class " + enhanceOriginClassName);
                 }
+                // 获取每个拦截点的方法匹配器
                 ElementMatcher.Junction<MethodDescription> junction = not(isStatic()).and(instanceMethodsInterceptPoint.getMethodsMatcher());
+                // 判断是不是声明式拦截点, 没有办法直接定位到具体的方法名称, 类似标注了 @RestController
                 if (instanceMethodsInterceptPoint instanceof DeclaredInstanceMethodsInterceptPoint) {
                     junction = junction.and(ElementMatchers.<MethodDescription>isDeclaredBy(typeDescription));
                 }
+                // 重写参数
                 if (instanceMethodsInterceptPoint.isOverrideArgs()) {
+                    // 是 jdk 类库
                     if (isBootstrapInstrumentation()) {
                         newClassBuilder =
-                            newClassBuilder.method(junction)
-                                .intercept(
-                                    MethodDelegation.withDefaultConfiguration()
-                                        .withBinders(
-                                            Morph.Binder.install(OverrideCallable.class)
-                                        )
-                                        .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
-                                );
-                    } else {
-                        newClassBuilder =
-                            newClassBuilder.method(junction)
-                                .intercept(
-                                    MethodDelegation.withDefaultConfiguration()
-                                        .withBinders(
-                                            Morph.Binder.install(OverrideCallable.class)
-                                        )
-                                        .to(new InstMethodsInterWithOverrideArgs(interceptor, classLoader))
-                                );
+                                newClassBuilder.method(junction)
+                                        .intercept(
+                                                MethodDelegation.withDefaultConfiguration()
+                                                        .withBinders(
+                                                                Morph.Binder.install(OverrideCallable.class)
+                                                        )
+                                                        .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
+                                        );
                     }
-                } else {
+                    // 非 jdk 类库
+                    else {
+                        newClassBuilder =
+                                newClassBuilder.method(junction)
+                                        .intercept(
+                                                MethodDelegation.withDefaultConfiguration()
+                                                        .withBinders(
+                                                                Morph.Binder.install(OverrideCallable.class)
+                                                        )
+                                                        .to(new InstMethodsInterWithOverrideArgs(interceptor, classLoader))
+                                        );
+                    }
+                }
+                // 不重写参数
+                else {
+                    // jdk 类库
                     if (isBootstrapInstrumentation()) {
                         newClassBuilder =
-                            newClassBuilder.method(junction)
-                                .intercept(
-                                    MethodDelegation.withDefaultConfiguration()
-                                        .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
-                                );
-                    } else {
+                                newClassBuilder.method(junction)
+                                        .intercept(
+                                                MethodDelegation.withDefaultConfiguration()
+                                                        .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
+                                        );
+                    }
+                    // 非 jdk 类库
+                    else {
                         newClassBuilder =
-                            newClassBuilder.method(junction)
-                                .intercept(
-                                    MethodDelegation.withDefaultConfiguration()
-                                        .to(new InstMethodsInter(interceptor, classLoader))
-                                );
+                                newClassBuilder.method(junction)
+                                        .intercept(
+                                                MethodDelegation.withDefaultConfiguration()
+                                                        .to(new InstMethodsInter(interceptor, classLoader))
+                                        );
                     }
                 }
             }
@@ -213,7 +237,8 @@ public abstract class ClassEnhancePluginDefine extends AbstractClassEnhancePlugi
      * @return new byte-buddy's builder for further manipulation.
      */
     private DynamicType.Builder<?> enhanceClass(TypeDescription typeDescription,
-        DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader) throws PluginException {
+                                                DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader) throws PluginException {
+        // 获取生效插件定义的静态方法拦截点
         StaticMethodsInterceptPoint[] staticMethodsInterceptPoints = getStaticMethodsInterceptPoints();
         String enhanceOriginClassName = typeDescription.getTypeName();
         if (staticMethodsInterceptPoints == null || staticMethodsInterceptPoints.length == 0) {
@@ -221,44 +246,55 @@ public abstract class ClassEnhancePluginDefine extends AbstractClassEnhancePlugi
         }
 
         for (StaticMethodsInterceptPoint staticMethodsInterceptPoint : staticMethodsInterceptPoints) {
+            // 获取自定义的方法拦截点, 它是一个字符串(类限定名), 后面会通过反射创建
             String interceptor = staticMethodsInterceptPoint.getMethodsInterceptor();
             if (StringUtil.isEmpty(interceptor)) {
                 throw new EnhanceException("no StaticMethodsAroundInterceptor define to enhance class " + enhanceOriginClassName);
             }
-
+            // 判断是否重写参数
             if (staticMethodsInterceptPoint.isOverrideArgs()) {
+                // 是 jdk 的类库
                 if (isBootstrapInstrumentation()) {
                     newClassBuilder = newClassBuilder.method(isStatic().and(staticMethodsInterceptPoint.getMethodsMatcher()))
-                        .intercept(
-                            MethodDelegation.withDefaultConfiguration()
-                                .withBinders(
-                                    Morph.Binder.install(OverrideCallable.class)
-                                )
-                                .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
-                        );
-                } else {
-                    newClassBuilder = newClassBuilder.method(isStatic().and(staticMethodsInterceptPoint.getMethodsMatcher()))
-                        .intercept(
-                            MethodDelegation.withDefaultConfiguration()
-                                .withBinders(
-                                    Morph.Binder.install(OverrideCallable.class)
-                                )
-                                .to(new StaticMethodsInterWithOverrideArgs(interceptor))
-                        );
+                            .intercept(
+                                    MethodDelegation.withDefaultConfiguration()
+                                            .withBinders(
+                                                    Morph.Binder.install(OverrideCallable.class)
+                                            )
+                                            .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
+                            );
                 }
-            } else {
+                // 非 jdk 类库
+                else {
+                    newClassBuilder = newClassBuilder.method(isStatic().and(staticMethodsInterceptPoint.getMethodsMatcher()))
+                            .intercept(
+                                    MethodDelegation.withDefaultConfiguration()
+                                            .withBinders(
+                                                    Morph.Binder.install(OverrideCallable.class)
+                                            )
+                                            .to(new StaticMethodsInterWithOverrideArgs(interceptor))
+                            );
+                }
+            }
+            // 不修改重写参数
+            else {
+                // 是 jdk 的类库
                 if (isBootstrapInstrumentation()) {
                     newClassBuilder = newClassBuilder.method(isStatic().and(staticMethodsInterceptPoint.getMethodsMatcher()))
-                        .intercept(
-                            MethodDelegation.withDefaultConfiguration()
-                                .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
-                        );
-                } else {
+                            .intercept(
+                                    MethodDelegation.withDefaultConfiguration()
+                                            .to(BootstrapInstrumentBoost.forInternalDelegateClass(interceptor))
+                            );
+                }
+                // 不是 jdk 类库
+                else {
+                    // 获取生效插件定义的静态方法拦截点
                     newClassBuilder = newClassBuilder.method(isStatic().and(staticMethodsInterceptPoint.getMethodsMatcher()))
-                        .intercept(
-                            MethodDelegation.withDefaultConfiguration()
-                                .to(new StaticMethodsInter(interceptor))
-                        );
+                            .intercept(
+                                    MethodDelegation.withDefaultConfiguration()
+                                            // 使用 ByteBuddy api 将真正的代理逻辑交给 StaticMethodsInter
+                                            .to(new StaticMethodsInter(interceptor))
+                            );
                 }
             }
 

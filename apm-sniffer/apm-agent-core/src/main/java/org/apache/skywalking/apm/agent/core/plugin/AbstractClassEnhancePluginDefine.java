@@ -42,9 +42,10 @@ public abstract class AbstractClassEnhancePluginDefine {
     /**
      * Main entrance of enhancing the class.
      *
-     * @param typeDescription target class description.
-     * @param builder byte-buddy's builder to manipulate target class's bytecode.
-     * @param classLoader load the given transformClass
+     * @param typeDescription target class description. 类描述对象
+     * @param builder         byte-buddy's builder to manipulate target class's bytecode. 可以理解为类的字节码
+     * @param classLoader     load the given transformClass 传入加载当前类的 classloader 对象
+     * @param context         用来判断是否已经增强过
      * @return the new builder, or <code>null</code> if not be enhanced.
      * @throws PluginException when set builder failure.
      */
@@ -61,13 +62,15 @@ public abstract class AbstractClassEnhancePluginDefine {
 
         /**
          * find witness classes for enhance class
+         * 用于识别组件的版本每个中间件的版本不同，插桩代码也会有所改变
+         * 只有当前加载目标类的 classloader 包含了 witness() 定义的一些特殊类，插件才会生效，否则直接跳过
          */
         String[] witnessClasses = witnessClasses();
         if (witnessClasses != null) {
             for (String witnessClass : witnessClasses) {
                 if (!WitnessClassFinder.INSTANCE.exist(witnessClass, classLoader)) {
                     logger.warn("enhance class {} by plugin {} is not working. Because witness class {} is not existed.", transformClassName, interceptorDefineClassName,
-                        witnessClass);
+                            witnessClass);
                     return null;
                 }
             }
@@ -75,9 +78,11 @@ public abstract class AbstractClassEnhancePluginDefine {
 
         /**
          * find origin class source code for interceptor
+         * 增强目标类
          */
         DynamicType.Builder<?> newClassBuilder = this.enhance(typeDescription, builder, classLoader, context);
 
+        // 标记这个类已经增强过, 防止重复增强
         context.initializationStageCompleted();
         logger.debug("enhance class {} by {} completely.", transformClassName, interceptorDefineClassName);
 
@@ -85,7 +90,7 @@ public abstract class AbstractClassEnhancePluginDefine {
     }
 
     protected abstract DynamicType.Builder<?> enhance(TypeDescription typeDescription,
-        DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader, EnhanceContext context) throws PluginException;
+                                                      DynamicType.Builder<?> newClassBuilder, ClassLoader classLoader, EnhanceContext context) throws PluginException;
 
     /**
      * Define the {@link ClassMatch} for filtering class.
@@ -105,7 +110,7 @@ public abstract class AbstractClassEnhancePluginDefine {
      * @return
      */
     protected String[] witnessClasses() {
-        return new String[] {};
+        return new String[]{};
     }
 
     public boolean isBootstrapInstrumentation() {

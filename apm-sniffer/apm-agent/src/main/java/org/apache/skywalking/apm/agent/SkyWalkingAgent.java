@@ -125,7 +125,7 @@ public class SkyWalkingAgent {
         agentBuilder
                 // 指定要拦截的类, 这里构造一个巨大的插件查询条件
             .type(pluginFinder.buildMatch())
-                // 指定 Transformer 修改类
+                // 指定 Transformer 插桩增强类
             .transform(new Transformer(pluginFinder))
                 // REDEFINITION 和 RETRANSFORMATION 区别在于是否保存修改前的内容
                 // REDEFINITION 会覆盖原来方法, RETRANSFORMATION 会重新定义一个方法
@@ -157,14 +157,24 @@ public class SkyWalkingAgent {
             this.pluginFinder = pluginFinder;
         }
 
+        /**
+         * 字节码插桩
+         *
+         * @param builder         当前拦截到的类的字节码
+         * @param typeDescription 简单当成 class, 包含了类的描述信息
+         * @param classLoader     加载当前拦截到的 classloader
+         * @param module
+         */
         @Override
         public DynamicType.Builder<?> transform(DynamicType.Builder<?> builder, TypeDescription typeDescription,
             ClassLoader classLoader, JavaModule module) {
+            // 根据传入的类, 判断能否找到增强的插件
             List<AbstractClassEnhancePluginDefine> pluginDefines = pluginFinder.find(typeDescription);
             if (pluginDefines.size() > 0) {
                 DynamicType.Builder<?> newBuilder = builder;
                 EnhanceContext context = new EnhanceContext();
                 for (AbstractClassEnhancePluginDefine define : pluginDefines) {
+                    // 调用插件的拦截方法, 获取拦截后的字节码
                     DynamicType.Builder<?> possibleNewBuilder = define.define(typeDescription, newBuilder, classLoader, context);
                     if (possibleNewBuilder != null) {
                         newBuilder = possibleNewBuilder;

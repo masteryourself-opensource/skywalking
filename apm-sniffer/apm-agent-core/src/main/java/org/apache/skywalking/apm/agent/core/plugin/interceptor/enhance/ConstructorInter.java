@@ -48,6 +48,7 @@ public class ConstructorInter {
      */
     public ConstructorInter(String constructorInterceptorClassName, ClassLoader classLoader) throws PluginException {
         try {
+            // 根据传入的构造方法拦截器类限定名反射创建实例对象
             interceptor = InterceptorInstanceLoader.load(constructorInterceptorClassName, classLoader);
         } catch (Throwable t) {
             throw new PluginException("Can't create InstanceConstructorInterceptor.", t);
@@ -64,8 +65,9 @@ public class ConstructorInter {
     public void intercept(@This Object obj,
         @AllArguments Object[] allArguments) {
         try {
+            // 类型转换
             EnhancedInstance targetObject = (EnhancedInstance)obj;
-
+            // 当原生的构造方法执行完成后, 会调用这里的 onConstruct() 方法
             interceptor.onConstruct(targetObject, allArguments);
         } catch (Throwable t) {
             logger.error("ConstructorInter failure.", t);

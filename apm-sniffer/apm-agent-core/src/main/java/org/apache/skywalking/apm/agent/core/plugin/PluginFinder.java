@@ -87,10 +87,11 @@ public class PluginFinder {
     public List<AbstractClassEnhancePluginDefine> find(TypeDescription typeDescription) {
         List<AbstractClassEnhancePluginDefine> matchedPlugins = new LinkedList<AbstractClassEnhancePluginDefine>();
         String typeName = typeDescription.getTypeName();
+        // 直接匹配
         if (nameMatchDefine.containsKey(typeName)) {
             matchedPlugins.addAll(nameMatchDefine.get(typeName));
         }
-
+        // 间接匹配, 需要调用 IndirectMatch.isMatch() 方法判断
         for (AbstractClassEnhancePluginDefine pluginDefine : signatureMatchDefine) {
             IndirectMatch match = (IndirectMatch)pluginDefine.enhanceClass();
             if (match.isMatch(typeDescription)) {

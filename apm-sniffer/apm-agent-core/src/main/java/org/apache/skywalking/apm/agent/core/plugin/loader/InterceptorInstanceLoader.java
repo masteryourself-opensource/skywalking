@@ -38,6 +38,12 @@ public class InterceptorInstanceLoader {
 
     private static ConcurrentHashMap<String, Object> INSTANCE_CACHE = new ConcurrentHashMap<String, Object>();
     private static ReentrantLock INSTANCE_LOAD_LOCK = new ReentrantLock();
+
+    /**
+     * pluginLoader 作用有两个
+     * key: 加载当前插件要拦截的那个类的类加载器
+     * value: 既能加载插件拦截器, 又能加载要拦截的那个类的类加载器
+     */
     private static Map<ClassLoader, ClassLoader> EXTEND_PLUGIN_CLASSLOADERS = new HashMap<ClassLoader, ClassLoader>();
 
     /**
@@ -59,16 +65,21 @@ public class InterceptorInstanceLoader {
         if (targetClassLoader == null) {
             targetClassLoader = InterceptorInstanceLoader.class.getClassLoader();
         }
+        // 缓存的 key 是和 classloader 有关的, 因为可能存在一种情况, 一个字节码文件被不同的 CL 加载
         String instanceKey = className + "_OF_" + targetClassLoader.getClass().getName() + "@" + Integer.toHexString(targetClassLoader.hashCode());
         Object inst = INSTANCE_CACHE.get(instanceKey);
         if (inst == null) {
             INSTANCE_LOAD_LOCK.lock();
             try {
+                // 这里会基于 [准备增强目标类的 CL] 重新构建一个 pluginLoader
+                // 这样可以保证这个 pluginLoader 既可以访问 [准备增强目标类], 也可以访问插件类
                 ClassLoader pluginLoader = EXTEND_PLUGIN_CLASSLOADERS.get(targetClassLoader);
                 if (pluginLoader == null) {
+                    // 这里需要重新构造 AgentClassLoader, 这样既可以对要加载的类进行访问, 也可以对插件进行访问, 称之为 pluginLoader
                     pluginLoader = new AgentClassLoader(targetClassLoader);
                     EXTEND_PLUGIN_CLASSLOADERS.put(targetClassLoader, pluginLoader);
                 }
+                // 实例化插件对象
                 inst = Class.forName(className, true, pluginLoader).newInstance();
             } finally {
                 INSTANCE_LOAD_LOCK.unlock();
