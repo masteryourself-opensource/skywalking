@@ -46,6 +46,7 @@ public enum PluginCfg {
                     if (pluginDefine == null || pluginDefine.trim().length() == 0 || pluginDefine.startsWith("#")) {
                         continue;
                     }
+                    // name 是配置文件的 key, defineClass 是 value, 即配置类
                     PluginDefine plugin = PluginDefine.build(pluginDefine);
                     pluginClassList.add(plugin);
                 } catch (IllegalPluginDefineException e) {

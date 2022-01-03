@@ -74,7 +74,7 @@ public class SkyWalkingAgent {
             // 1. 初始化配置
             SnifferConfigInitializer.initialize(agentArgs);
 
-            // 2. 加载插件
+            // 2. 加载插件并分类
             pluginFinder = new PluginFinder(new PluginBootstrap().loadPlugins());
 
         } catch (ConfigNotFoundException ce) {
@@ -87,10 +87,10 @@ public class SkyWalkingAgent {
             logger.error(e, "SkyWalking agent initialized failure. Shutting down.");
             return;
         }
-
+        // 3. 创建 ByteBuddy 实例
         final ByteBuddy byteBuddy = new ByteBuddy()
             .with(TypeValidation.of(Config.Agent.IS_OPEN_DEBUGGING_CLASS));
-
+        // 指定需要忽略的类
         AgentBuilder agentBuilder = new AgentBuilder.Default(byteBuddy)
             .ignore(
                 nameStartsWith("net.bytebuddy.")
@@ -101,9 +101,12 @@ public class SkyWalkingAgent {
                     .or(nameStartsWith("sun.reflect"))
                     .or(allSkyWalkingAgentExcludeToolkit())
                     .or(ElementMatchers.<TypeDescription>isSynthetic()));
-
+        // jdk9 的模块化
         JDK9ModuleExporter.EdgeClasses edgeClasses = new JDK9ModuleExporter.EdgeClasses();
         try {
+            // 将必要的一些工具类装载到 BootStrap Classloader 中
+            // 为什么需要这样设计呢? 因为可以对 jdk 的一些类做增强, 但由于双亲委派机制
+            // BootStrap Classloader 对 skywalking 增强的工具类不可见, 所以需要把一些必要的类注册到 BootStrap Classloader
             agentBuilder = BootstrapInstrumentBoost.inject(pluginFinder, instrumentation, agentBuilder, edgeClasses);
         } catch (Exception e) {
             logger.error(e, "SkyWalking agent inject bootstrap instrumentation failure. Shutting down.");
@@ -111,18 +114,25 @@ public class SkyWalkingAgent {
         }
 
         try {
+            // 绕开 jdk9 模块系统
             agentBuilder = JDK9ModuleExporter.openReadEdge(instrumentation, agentBuilder, edgeClasses);
         } catch (Exception e) {
             logger.error(e, "SkyWalking agent open read edge in JDK 9+ failure. Shutting down.");
             return;
         }
 
-        // 3. 定制化 Agent 行为
+        // 定制化 Agent 行为
         agentBuilder
+                // 指定要拦截的类, 这里构造一个巨大的插件查询条件
             .type(pluginFinder.buildMatch())
+                // 指定 Transformer 修改类
             .transform(new Transformer(pluginFinder))
+                // REDEFINITION 和 RETRANSFORMATION 区别在于是否保存修改前的内容
+                // REDEFINITION 会覆盖原来方法, RETRANSFORMATION 会重新定义一个方法
             .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                // 对 Transformer 后的监听, 输出日志
             .with(new Listener())
+                // 将 Agent 安装到 instrumentation
             .installOn(instrumentation);
 
         try {

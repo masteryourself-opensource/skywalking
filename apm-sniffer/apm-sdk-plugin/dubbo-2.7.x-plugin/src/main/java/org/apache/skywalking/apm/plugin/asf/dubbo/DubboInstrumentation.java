@@ -34,30 +34,50 @@ public class DubboInstrumentation extends ClassInstanceMethodsEnhancePluginDefin
 
     private static final String INTERCEPT_CLASS = "org.apache.skywalking.apm.plugin.asf.dubbo.DubboInterceptor";
 
+    /**
+     * 需要拦截的类
+     */
     @Override
     protected ClassMatch enhanceClass() {
         return NameMatch.byName(ENHANCE_CLASS);
     }
 
+    /**
+     * 是否拦截构造器, 返回 null 表示不拦截
+     */
     @Override
     public ConstructorInterceptPoint[] getConstructorsInterceptPoints() {
         return null;
     }
 
+    /**
+     * 是否拦截实例方法
+     */
     @Override
     public InstanceMethodsInterceptPoint[] getInstanceMethodsInterceptPoints() {
+        // 返回多个拦截点
         return new InstanceMethodsInterceptPoint[] {
+            // 自定义一个拦截点
             new InstanceMethodsInterceptPoint() {
+                /**
+                 * 拦截 invoke 方法
+                 */
                 @Override
                 public ElementMatcher<MethodDescription> getMethodsMatcher() {
                     return named("invoke");
                 }
 
+                /**
+                 * 拦截逻辑
+                 */
                 @Override
                 public String getMethodsInterceptor() {
                     return INTERCEPT_CLASS;
                 }
 
+                /**
+                 * 是否重写参数
+                 */
                 @Override
                 public boolean isOverrideArgs() {
                     return false;

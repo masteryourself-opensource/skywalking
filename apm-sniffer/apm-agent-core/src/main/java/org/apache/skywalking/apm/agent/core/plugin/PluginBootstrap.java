@@ -42,9 +42,11 @@ public class PluginBootstrap {
      * @return plugin definition list.
      */
     public List<AbstractClassEnhancePluginDefine> loadPlugins() throws AgentPackageNotFoundException {
+        // 初始化 AgentClassLoader
         AgentClassLoader.initDefaultLoader();
 
         PluginResourcesResolver resolver = new PluginResourcesResolver();
+        // 读取所有的 skywalking-plugin.def 资源文件
         List<URL> resources = resolver.getResources();
 
         if (resources == null || resources.size() == 0) {
@@ -54,29 +56,33 @@ public class PluginBootstrap {
 
         for (URL pluginUrl : resources) {
             try {
+                // 解析文件内容, 将其封装成 PluginDefine 集合
                 PluginCfg.INSTANCE.load(pluginUrl.openStream());
             } catch (Throwable t) {
                 logger.error(t, "plugin file [{}] init failure.", pluginUrl);
             }
         }
-
+        // 获取从上一步解析的所有插件
         List<PluginDefine> pluginClassList = PluginCfg.INSTANCE.getPluginClassList();
 
         List<AbstractClassEnhancePluginDefine> plugins = new ArrayList<AbstractClassEnhancePluginDefine>();
         for (PluginDefine pluginDefine : pluginClassList) {
             try {
                 logger.debug("loading plugin class {}.", pluginDefine.getDefineClass());
+                // 使用 classloader 实例化出插件对象
                 AbstractClassEnhancePluginDefine plugin =
                     (AbstractClassEnhancePluginDefine)Class.forName(pluginDefine.getDefineClass(),
                         true,
                         AgentClassLoader.getDefault())
                         .newInstance();
+                // 加载到插件集合中
                 plugins.add(plugin);
             } catch (Throwable t) {
                 logger.error(t, "load plugin [{}] failure.", pluginDefine.getDefineClass());
             }
         }
 
+        // 加载基于 xml 定义的插件
         plugins.addAll(DynamicPluginLoader.INSTANCE.load(AgentClassLoader.getDefault()));
 
         return plugins;

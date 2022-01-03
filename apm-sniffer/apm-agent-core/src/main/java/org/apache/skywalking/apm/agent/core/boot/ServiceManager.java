@@ -42,10 +42,13 @@ public enum ServiceManager {
     private Map<Class, BootService> bootedServices = Collections.emptyMap();
 
     public void boot() {
+        // 加载所有服务实例
         bootedServices = loadAllServices();
-
+        // 按照优先级排序分别调用 prepare() 方法
         prepare();
+        // 按照优先级排序分别调用 startup() 方法
         startup();
+        // 按照优先级排序分别调用 onComplete() 方法
         onComplete();
     }
 
@@ -62,12 +65,15 @@ public enum ServiceManager {
     private Map<Class, BootService> loadAllServices() {
         Map<Class, BootService> bootedServices = new LinkedHashMap<Class, BootService>();
         List<BootService> allServices = new LinkedList<BootService>();
+        // 使用 serviceloader 加载所有的 BootService SPI 实例
         load(allServices);
         Iterator<BootService> serviceIterator = allServices.iterator();
+        // 循环处理每个 SPI 实例
         while (serviceIterator.hasNext()) {
             BootService bootService = serviceIterator.next();
 
             Class<? extends BootService> bootServiceClass = bootService.getClass();
+            // 如果标记了 @DefaultImplementor 默认实现. 添加到 bootedServices 中
             boolean isDefaultImplementor = bootServiceClass.isAnnotationPresent(DefaultImplementor.class);
             if (isDefaultImplementor) {
                 if (!bootedServices.containsKey(bootServiceClass)) {
@@ -76,7 +82,9 @@ public enum ServiceManager {
                     //ignore the default service
                 }
             } else {
+                // 如果没有标记默认实现, 判断是否加了 @OverrideImplementor 覆盖实现
                 OverrideImplementor overrideImplementor = bootServiceClass.getAnnotation(OverrideImplementor.class);
+                // 如果没有覆盖实现, 就直接添加相当于是默认实现
                 if (overrideImplementor == null) {
                     if (!bootedServices.containsKey(bootServiceClass)) {
                         bootedServices.put(bootServiceClass, bootService);
@@ -84,6 +92,8 @@ public enum ServiceManager {
                         throw new ServiceConflictException("Duplicate service define for :" + bootServiceClass);
                     }
                 } else {
+                    // 判断是否包含已有的实现, 如果包含需要校验 value 指向的服务是否有
+                    // @DefaultImplementor 默认实现, 没有就直接报错不符合规范
                     Class<? extends BootService> targetService = overrideImplementor.value();
                     if (bootedServices.containsKey(targetService)) {
                         boolean presentDefault = bootedServices.get(targetService).getClass().isAnnotationPresent(DefaultImplementor.class);
@@ -94,6 +104,7 @@ public enum ServiceManager {
                                 "exist more than one service want to override :" + targetService);
                         }
                     } else {
+                        // 这种情况是当前覆盖实现的默认实现还没有被加载进来, 这时候就直接把覆盖实现当成默认实现
                         bootedServices.put(targetService, bootService);
                     }
                 }
