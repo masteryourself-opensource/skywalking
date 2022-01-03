@@ -39,6 +39,7 @@ import org.apache.skywalking.apm.util.RunnableWithExceptionProtection;
  * send all of them to collector, if SAMPLING is on.
  * <p>
  * By default, SAMPLING is on, and  {@link Config.Agent#SAMPLE_N_PER_3_SECS }
+ * 采样
  *
  * @author wusheng
  */
@@ -48,6 +49,7 @@ public class SamplingService implements BootService {
 
     private volatile boolean on = false;
     private volatile AtomicInteger samplingFactorHolder;
+    // 每 3s 重置采样服务为 0
     private volatile ScheduledFuture<?> scheduledFuture;
 
     @Override
@@ -64,6 +66,7 @@ public class SamplingService implements BootService {
              */
             scheduledFuture.cancel(true);
         }
+        // 每 3s 的采样配置值是否 >0, 大于 0 才表示开启采样
         if (Config.Agent.SAMPLE_N_PER_3_SECS > 0) {
             on = true;
             this.resetSamplingFactor();
@@ -99,6 +102,7 @@ public class SamplingService implements BootService {
      * @return true, if sampling mechanism is on, and getDefault the sampling factor successfully.
      */
     public boolean trySampling() {
+        // 如果未开启采样, 则所有都收集
         if (on) {
             int factor = samplingFactorHolder.get();
             if (factor < Config.Agent.SAMPLE_N_PER_3_SECS) {

@@ -25,7 +25,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author zhangkewei
  */
 public class DefaultNamedThreadFactory implements ThreadFactory {
+    // 线程工厂序列
     private static final AtomicInteger BOOT_SERVICE_SEQ = new AtomicInteger(0);
+    // 每个线程工厂对应的线程序列
     private final AtomicInteger threadSeq = new AtomicInteger(0);
     private final String namePrefix;
     public DefaultNamedThreadFactory(String name) {

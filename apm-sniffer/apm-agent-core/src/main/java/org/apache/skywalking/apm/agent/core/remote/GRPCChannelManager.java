@@ -39,18 +39,24 @@ import org.apache.skywalking.apm.util.RunnableWithExceptionProtection;
 
 /**
  * @author wusheng, zhang xin
+ * 负责 Agent 到 OAP 的 GRPC 网络连接
  */
 @DefaultImplementor
 public class GRPCChannelManager implements BootService, Runnable {
     private static final ILog logger = LogManager.getLogger(GRPCChannelManager.class);
 
+    // 网络连接
     private volatile GRPCChannel managedChannel = null;
+    // 网络连接状态定时检查器
     private volatile ScheduledFuture<?> connectCheckFuture;
     private volatile boolean reconnect = true;
     private Random random = new Random();
     private List<GRPCChannelListener> listeners = Collections.synchronizedList(new LinkedList<GRPCChannelListener>());
+    // OAP 服务地址
     private volatile List<String> grpcServers;
+    // 上次选择的 OAP 服务地址下标
     private volatile int selectedIdx = -1;
+    // 网络重连次数
     private volatile int reconnectCount = 0;
 
     @Override
@@ -67,7 +73,9 @@ public class GRPCChannelManager implements BootService, Runnable {
         }
         grpcServers = Arrays.asList(Config.Collector.BACKEND_SERVICE.split(","));
         connectCheckFuture = Executors
+                // 自定义线程工厂
             .newSingleThreadScheduledExecutor(new DefaultNamedThreadFactory("GRPCChannelManager"))
+                // 自定义 runnable, 可以处理异常(简单打印)
             .scheduleAtFixedRate(new RunnableWithExceptionProtection(this, new RunnableWithExceptionProtection.CallbackWhenException() {
                 @Override
                 public void handle(Throwable t) {
@@ -100,6 +108,7 @@ public class GRPCChannelManager implements BootService, Runnable {
                 String server = "";
                 try {
                     int index = Math.abs(random.nextInt()) % grpcServers.size();
+                    // 如果和上一次选择地址不一样, 就重新创建连接
                     if (index != selectedIdx) {
                         selectedIdx = index;
 
@@ -116,14 +125,19 @@ public class GRPCChannelManager implements BootService, Runnable {
                             .addChannelDecorator(new AgentIDDecorator())
                             .addChannelDecorator(new AuthenticationDecorator())
                             .build();
+                        // 通知所有的监听器
                         notify(GRPCChannelStatus.CONNECTED);
                         reconnectCount = 0;
                         reconnect = false;
-                    } else if (managedChannel.isConnected(++reconnectCount > Config.Agent.FORCE_RECONNECTION_PERIOD)) {
+                    }
+                    // 如果和上次地址一样, 假设就只有一台, 肯定会进入这个方法
+                    // 那就直接判断连接是否正常, 因为 grpc 会重新连接
+                    else if (managedChannel.isConnected(++reconnectCount > Config.Agent.FORCE_RECONNECTION_PERIOD)) {
                         // Reconnect to the same server is automatically done by GRPC,
                         // therefore we are responsible to check the connectivity and
                         // set the state and notify listeners
                         reconnectCount = 0;
+                        // 通知所有的监听器
                         notify(GRPCChannelStatus.CONNECTED);
                         reconnect = false;
                     }
@@ -161,6 +175,7 @@ public class GRPCChannelManager implements BootService, Runnable {
     private void notify(GRPCChannelStatus status) {
         for (GRPCChannelListener listener : listeners) {
             try {
+                // 调用监听器的 statusChanged() 方法
                 listener.statusChanged(status);
             } catch (Throwable t) {
                 logger.error(t, "Fail to notify {} about channel connected.", listener.getClass().getName());

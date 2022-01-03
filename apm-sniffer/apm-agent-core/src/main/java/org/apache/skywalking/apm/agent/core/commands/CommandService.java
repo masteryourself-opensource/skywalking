@@ -34,6 +34,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 
+/**
+ * 负责从 CommandExecutorService 接收命令, 处理结果
+ */
 @DefaultImplementor
 public class CommandService implements BootService, Runnable {
 
@@ -41,6 +44,7 @@ public class CommandService implements BootService, Runnable {
 
     private volatile boolean isRunning = true;
     private ExecutorService executorService = Executors.newSingleThreadExecutor();
+    // 带处理的任务列表
     private LinkedBlockingQueue<BaseCommand> commands = new LinkedBlockingQueue<BaseCommand>(64);
     private CommandSerialNumberCache serialNumberCache = new CommandSerialNumberCache();
 
@@ -65,7 +69,7 @@ public class CommandService implements BootService, Runnable {
         while (isRunning) {
             try {
                 BaseCommand command = commands.take();
-
+                // 判断是否执行过, 同一个不要重复执行
                 if (isCommandExecuted(command)) {
                     continue;
                 }

@@ -57,6 +57,7 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Collector.GRPC_UP
 
 /**
  * @author wusheng
+ * 负责上报服务信息和心跳
  */
 @DefaultImplementor
 public class ServiceAndEndpointRegisterClient implements BootService, Runnable, GRPCChannelListener {
@@ -64,16 +65,23 @@ public class ServiceAndEndpointRegisterClient implements BootService, Runnable, 
     private static String INSTANCE_UUID;
     private static List<KeyStringValuePair> SERVICE_INSTANCE_PROPERTIES;
 
+    // 当前的网络连接状态
     private volatile GRPCChannelStatus status = GRPCChannelStatus.DISCONNECT;
+    // 注册网络服务
     private volatile RegisterGrpc.RegisterBlockingStub registerBlockingStub;
+    // ping 网络服务
     private volatile ServiceInstancePingGrpc.ServiceInstancePingBlockingStub serviceInstancePingStub;
+    // 应用上报信息定时任务
     private volatile ScheduledFuture<?> applicationRegisterFuture;
     private volatile long coolDownStartTime = -1;
 
     @Override
     public void statusChanged(GRPCChannelStatus status) {
+        // 监听 GRPCChannelManager 中的网络连接变化
         if (GRPCChannelStatus.CONNECTED.equals(status)) {
+            // 从 GRPCChannelManager 中获取网络连接
             Channel channel = ServiceManager.INSTANCE.findService(GRPCChannelManager.class).getChannel();
+            // 创建 stub 本地存根, 实现网络调用
             registerBlockingStub = RegisterGrpc.newBlockingStub(channel);
             serviceInstancePingStub = ServiceInstancePingGrpc.newBlockingStub(channel);
         } else {
@@ -85,13 +93,14 @@ public class ServiceAndEndpointRegisterClient implements BootService, Runnable, 
 
     @Override
     public void prepare() throws Throwable {
+        // 把自己当做监听器注册到 GRPCChannelManager
         ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
 
         INSTANCE_UUID = StringUtil.isEmpty(Config.Agent.INSTANCE_UUID) ? UUID.randomUUID().toString()
             .replaceAll("-", "") : Config.Agent.INSTANCE_UUID;
 
         SERVICE_INSTANCE_PROPERTIES = new ArrayList<KeyStringValuePair>();
-
+        // 从配置文件中获取属性, 放到 SERVICE_INSTANCE_PROPERTIES
         for (String key : Config.Agent.INSTANCE_PROPERTIES.keySet()) {
             SERVICE_INSTANCE_PROPERTIES.add(KeyStringValuePair.newBuilder()
                 .setKey(key).setValue(Config.Agent.INSTANCE_PROPERTIES.get(key)).build());
@@ -116,6 +125,7 @@ public class ServiceAndEndpointRegisterClient implements BootService, Runnable, 
 
     @Override
     public void shutdown() throws Throwable {
+        // 取消定时任务
         applicationRegisterFuture.cancel(true);
     }
 
@@ -135,6 +145,7 @@ public class ServiceAndEndpointRegisterClient implements BootService, Runnable, 
         coolDownStartTime = -1;
 
         boolean shouldTry = true;
+        // 判断网络连接
         while (GRPCChannelStatus.CONNECTED.equals(status) && shouldTry) {
             shouldTry = false;
             try {

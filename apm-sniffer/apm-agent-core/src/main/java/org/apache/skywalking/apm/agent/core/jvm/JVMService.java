@@ -59,8 +59,11 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Collector.GRPC_UP
 public class JVMService implements BootService, Runnable {
     private static final ILog logger = LogManager.getLogger(JVMService.class);
     private LinkedBlockingQueue<JVMMetric> queue;
+    // 收集 JVM 信息的定时任务
     private volatile ScheduledFuture<?> collectMetricFuture;
+    // 发送 JVM 信息的定时任务
     private volatile ScheduledFuture<?> sendMetricFuture;
+    // 发送工具
     private Sender sender;
 
     @Override
